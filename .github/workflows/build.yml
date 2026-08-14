@@ -44,14 +44,27 @@ jobs:
             build 2>&1 | tee xcodebuild.log | grep -E "warning:|error:|BUILD" || true
 
       - name: Verify app bundle integrity
+        if: always()
         run: |
           APP=$(find build/Build/Products -name '*.app' -type d | head -1)
           echo "APP=$APP"
+          {
+            echo "## Build output"
+            echo '```'
+            tail -80 xcodebuild.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          [ -n "$APP" ] || { echo "::error::no .app produced"; exit 1; }
           EXEC=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$APP/Info.plist")
           echo "CFBundleExecutable=$EXEC"
           if [ ! -f "$APP/$EXEC" ]; then
             echo "::error::Main executable missing from bundle!"
-            find "$APP" -maxdepth 2 -print
+            {
+              echo "## Bundle listing"
+              echo '```'
+              find "$APP" -maxdepth 2 -print
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
             exit 1
           fi
           file "$APP/$EXEC"
