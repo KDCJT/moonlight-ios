@@ -29,7 +29,7 @@ jobs:
       - name: Show Xcode version
         run: xcodebuild -version
 
-      - name: Build
+      - name: Build (ad-hoc signed)
         run: |
           set -o pipefail
           xcodebuild -project Moonlight.xcodeproj \
@@ -37,62 +37,43 @@ jobs:
             -configuration Release \
             -destination 'generic/platform=iOS' \
             -derivedDataPath build \
-            CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGN_IDENTITY='' \
-            CODE_SIGN_ENTITLEMENTS='' \
-            AD_HOC_CODE_SIGNING_ALLOWED=YES \
+            CODE_SIGN_IDENTITY=- \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=YES \
+            DEVELOPMENT_TEAM= \
             build 2>&1 | tee xcodebuild.log | grep -E "warning:|error:|BUILD" || true
 
-      - name: List build products
-        run: find build/Build/Products -maxdepth 3 \( -name '*.app' -o -name '*.ipa' \) -print
-
-      - name: Debug output before anything
-        if: always()
+      - name: Verify app bundle integrity
         run: |
           APP=$(find build/Build/Products -name '*.app' -type d | head -1)
           echo "APP=$APP"
-          find "$APP" -print | head -60
           EXEC=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$APP/Info.plist")
-          echo "EXEC=$EXEC"
-          file "$APP/$EXEC" || true
-          ldid -e "$APP" 2>&1 | head -20 || true
+          echo "CFBundleExecutable=$EXEC"
+          if [ ! -f "$APP/$EXEC" ]; then
+            echo "::error::Main executable missing from bundle!"
+            find "$APP" -maxdepth 2 -print
+            exit 1
+          fi
+          file "$APP/$EXEC"
+          ls -la "$APP/$EXEC"
 
-      - name: Ad-hoc sign for TrollStore
+      - name: Ad-hoc re-sign for TrollStore
         run: |
-          set -ex
+          set -e
           APP=$(find build/Build/Products -name '*.app' -type d | head -1)
-          EXEC=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$APP/Info.plist")
           # Sign nested code first, then the bundle itself (ad-hoc, no cert needed)
           find "$APP" -type d \( -name '*.framework' -o -name '*.appex' \) -print0 | while IFS= read -r -d '' f; do
-            echo "signing $f"
             codesign -s - --force "$f"
           done
           find "$APP" -type f -name '*.dylib' -print0 | while IFS= read -r -d '' f; do
-            echo "signing $f"
             codesign -s - --force "$f"
           done
           codesign -s - --force --generate-entitlement-der "$APP"
-          echo "== Verify =="
-          codesign -dv "$APP" 2>&1 | head -8
           codesign --verify --deep "$APP" && echo "codesign verify OK"
-          {
-            echo "## Bundle diagnostics"
-            echo '```'
-            find "$APP" -maxdepth 2 -print
-            file "$APP/$EXEC" || true
-            /usr/libexec/PlistBuddy -c 'Print' "$APP/Info.plist" 2>/dev/null | head -40
-            codesign -d --entitlements - "$APP" 2>&1 | head -30
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Package IPA
         run: |
           APP=$(find build/Build/Products -name '*.app' -type d | head -1)
-          if [ -z "$APP" ]; then
-            echo "No .app found — searching for products:"
-            find build/Build/Products -maxdepth 3 -print
-            exit 1
-          fi
           rm -rf Payload
           mkdir -p Payload
           cp -R "$APP" Payload/
@@ -105,41 +86,6 @@ jobs:
           name: ${{ matrix.artifact_name }}-TrollStore-IPA
           path: ${{ matrix.artifact_name }}.ipa
           if-no-files-found: error
-
-      - name: Publish IPA + diagnostics to gh-pages
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -e
-          APP=$(find build/Build/Products -name '*.app' -type d | head -1)
-          EXEC=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$APP/Info.plist")
-          mkdir -p pub
-          cp "${{ matrix.artifact_name }}.ipa" pub/
-          {
-            echo "# Build diagnostics"
-            echo '```'
-            echo "== Bundle listing =="
-            find "$APP" -maxdepth 2 -print
-            echo "== Executable type =="
-            file "$APP/$EXEC"
-            echo "== Main binary size =="
-            ls -la "$APP/$EXEC"
-            echo "== Entitlements =="
-            codesign -d --entitlements - --xml "$APP" 2>/dev/null | head -40
-            echo "== codesign -dv =="
-            codesign -dv "$APP" 2>&1 | head -12
-            echo "== deep verify =="
-            codesign --verify --deep --verbose=2 "$APP" 2>&1 | head -20
-            echo '```'
-          } > pub/diagnostics.md
-          cd pub
-          git init
-          git checkout -b gh-pages
-          git add -A
-          git -c user.name=ci -c user.email=ci@users.noreply.github.com commit -m "IPA build $GITHUB_RUN_ID"
-          # Push using gh's credential helper (token never printed)
-          gh auth setup-git
-          git push -f "https://github.com/KDCJT/moonlight-ios.git" gh-pages:gh-pages
 
       - name: Upload build log on failure
         if: failure()
