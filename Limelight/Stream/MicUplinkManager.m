@@ -289,9 +289,16 @@
     (void)info;
 
     AVAudioSession *audioSession = [AVAudioSession sharedInstance];
+    // AllowBluetoothHFP is iOS 14+; fall back to the deprecated alias on iOS 13
+    AVAudioSessionCategoryOptions bluetoothOption;
+    if (@available(iOS 14.0, *)) {
+        bluetoothOption = AVAudioSessionCategoryOptionAllowBluetoothHFP;
+    } else {
+        bluetoothOption = AVAudioSessionCategoryOptionAllowBluetooth;
+    }
     if (![audioSession setCategory:AVAudioSessionCategoryPlayAndRecord
                        withOptions:(AVAudioSessionCategoryOptionMixWithOthers |
-                                    AVAudioSessionCategoryOptionAllowBluetoothHFP |
+                                    bluetoothOption |
                                     AVAudioSessionCategoryOptionDefaultToSpeaker)
                              error:error]) {
         return NO;
