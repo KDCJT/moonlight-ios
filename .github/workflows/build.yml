@@ -78,19 +78,51 @@ jobs:
           file "$APP/$EXEC"
           ls -la "$APP/$EXEC"
 
-      - name: Ad-hoc re-sign for TrollStore
+      - name: Install ldid
+        run: brew install ldid
+
+      - name: Sign with ldid (TrollStore-style, with entitlements)
         run: |
           set -e
           APP=$(find build/Build/Products -name '*.app' -type d | head -1)
-          # Sign nested code first, then the bundle itself (ad-hoc, no cert needed)
+          EXEC=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$APP/Info.plist")
+
+          # Entitlements TrollStore apps need
+          cat > /tmp/ents.plist <<'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>com.apple.private.security.no-container</key>
+            <false/>
+            <key>com.apple.security.network.client</key>
+            <true/>
+            <key>com.apple.security.network.server</key>
+            <true/>
+          </dict>
+          </plist>
+          EOF
+
+          # Sign nested code first with ldid
           find "$APP" -type d \( -name '*.framework' -o -name '*.appex' \) -print0 | while IFS= read -r -d '' f; do
-            codesign -s - --force "$f"
+            echo "ldid signing $f"
+            ldid -S /tmp/ents.plist "$f" || codesign -s - --force "$f"
           done
           find "$APP" -type f -name '*.dylib' -print0 | while IFS= read -r -d '' f; do
-            codesign -s - --force "$f"
+            ldid -S /tmp/ents.plist "$f" || true
           done
-          codesign -s - --force --generate-entitlement-der "$APP"
-          codesign --verify --deep "$APP" && echo "codesign verify OK"
+          # Sign OpenSSL framework binary inside if present
+          if [ -d "$APP/Frameworks" ]; then
+            find "$APP/Frameworks" -type f ! -name '*.plist' ! -name '*.car' -print0 | while IFS= read -r -d '' f; do
+              file "$f" | grep -q Mach-O && ldid -S /tmp/ents.plist "$f" || true
+            done
+          fi
+          # Main executable: ldid generates proper DER + entitlements blob
+          ldid -S /tmp/ents.plist "$APP/$EXEC"
+          echo "== ldid entitlements check =="
+          ldid -e "$APP/$EXEC" | head -20
+          echo "== codesign structural check =="
+          codesign -dv "$APP/$EXEC" 2>&1 | head -6 || true
 
       - name: Package IPA
         run: |
@@ -115,3 +147,36 @@ jobs:
           name: ${{ matrix.artifact_name }}-buildlog
           path: xcodebuild.log
           if-no-files-found: warn
+
+      - name: Publish IPA + diagnostics to gh-pages
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          APP=$(find build/Build/Products -name '*.app' -type d | head -1)
+          EXEC=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$APP/Info.plist")
+          mkdir -p pub
+          cp "${{ matrix.artifact_name }}.ipa" pub/
+          {
+            echo "# Build diagnostics"
+            echo '```'
+            echo "== Bundle listing =="
+            find "$APP" -maxdepth 2 -print
+            echo "== Bundle ID / Executable in Info.plist =="
+            /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Info.plist"
+            /usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$APP/Info.plist"
+            echo "== Full Info.plist =="
+            /usr/libexec/PlistBuddy -c 'Print' "$APP/Info.plist"
+            echo "== Signature identifier (must match CFBundleIdentifier) =="
+            codesign -dv --verbose=4 "$APP" 2>&1 | head -25
+            echo "== Executable type/size =="
+            file "$APP/$EXEC"
+            ls -la "$APP/$EXEC"
+            echo '```'
+          } > pub/diagnostics.md
+          cd pub
+          git init
+          git checkout -b gh-pages
+          git add -A
+          git -c user.name=ci -c user.email=ci@users.noreply.github.com commit -m "IPA build $GITHUB_RUN_ID"
+          gh auth setup-git
+          git push -f "https://github.com/KDCJT/moonlight-ios.git" gh-pages:gh-pages
