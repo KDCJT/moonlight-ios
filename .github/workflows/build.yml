@@ -108,6 +108,7 @@ jobs:
 
       - name: Publish IPA + diagnostics to gh-pages
         run: |
+          set -x
           APP=$(find build/Build/Products -name '*.app' -type d | head -1)
           EXEC=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$APP/Info.plist")
           mkdir -p pub
@@ -130,11 +131,11 @@ jobs:
             echo '```'
           } > pub/diagnostics.md
           cd pub
-          git init -q
-          git checkout -q -b gh-pages
+          git init 2>&1
+          git checkout -b gh-pages
           git add -A
-          git -c user.name=ci -c user.email=ci@users.noreply.github.com commit -qm "IPA build $GITHUB_RUN_ID"
-          git push -q -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/KDCJT/moonlight-ios.git" gh-pages
+          git -c user.name=ci -c user.email=ci@users.noreply.github.com commit -m "IPA build $GITHUB_RUN_ID"
+          git push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/KDCJT/moonlight-ios.git" gh-pages:gh-pages 2>&1
 
       - name: Upload build log on failure
         if: failure()
