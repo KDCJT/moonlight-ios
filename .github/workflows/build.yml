@@ -1,0 +1,63 @@
+name: Build Moonlight
+
+on:
+  push:
+    branches: [master, dev]
+  pull_request:
+    branches: [master, dev]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build ${{ matrix.scheme }} (${{ matrix.platform }})
+    runs-on: macos-15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - scheme: Moonlight
+            platform: iOS
+            destination: 'generic/platform=iOS Simulator'
+            artifact_name: Moonlight-iOS
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Show Xcode version
+        run: xcodebuild -version
+
+      - name: Build
+        run: |
+          set -o pipefail
+          xcodebuild -project Moonlight.xcodeproj \
+            -scheme "${{ matrix.scheme }}" \
+            -configuration Release \
+            -destination "${{ matrix.destination }}" \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            clean build | tee xcodebuild.log | grep -E "warning:|error:|BUILD" || true
+
+      - name: Package app
+        run: |
+          APP=$(find build/Build/Products/Release -maxdepth 1 -name '*.app' | head -1)
+          mkdir -p artifacts
+          cp -R "$APP" "artifacts/${{ matrix.artifact_name }}.app"
+          cd artifacts && zip -qry "${{ matrix.artifact_name }}.zip" "${{ matrix.artifact_name }}.app"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: artifacts/${{ matrix.artifact_name }}.zip
+          if-no-files-found: error
+
+      - name: Upload build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}-buildlog
+          path: xcodebuild.log
+          if-no-files-found: warn
