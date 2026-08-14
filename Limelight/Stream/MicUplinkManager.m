@@ -289,12 +289,12 @@
     (void)info;
 
     AVAudioSession *audioSession = [AVAudioSession sharedInstance];
-    // AllowBluetoothHFP is iOS 14+; fall back to the deprecated alias on iOS 13
+    // AllowBluetoothHFP (0x20) is iOS 14+; use the old AllowBluetooth value (0x4) on iOS 13
     AVAudioSessionCategoryOptions bluetoothOption;
     if (@available(iOS 14.0, *)) {
-        bluetoothOption = AVAudioSessionCategoryOptionAllowBluetoothHFP;
+        bluetoothOption = 0x20; // AVAudioSessionCategoryOptionAllowBluetoothHFP
     } else {
-        bluetoothOption = AVAudioSessionCategoryOptionAllowBluetooth;
+        bluetoothOption = 0x4; // AVAudioSessionCategoryOptionAllowBluetooth
     }
     if (![audioSession setCategory:AVAudioSessionCategoryPlayAndRecord
                        withOptions:(AVAudioSessionCategoryOptionMixWithOthers |
