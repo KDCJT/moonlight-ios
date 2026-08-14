@@ -44,6 +44,21 @@ jobs:
       - name: List build products
         run: find build/Build/Products -maxdepth 3 \( -name '*.app' -o -name '*.ipa' \) -print
 
+      - name: Ad-hoc sign for TrollStore
+        run: |
+          set -e
+          APP=$(find build/Build/Products -name '*.app' -type d | head -1)
+          EXEC=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$APP/Info.plist")
+          # Sign nested code first, then the bundle itself (ad-hoc, no cert needed)
+          find "$APP" -type d \( -name '*.framework' -o -name '*.appex' \) -print0 | while IFS= read -r -d '' f; do
+            codesign -s - --force "$f" || true
+          done
+          find "$APP" -type f -name '*.dylib' -print0 | while IFS= read -r -d '' f; do
+            codesign -s - --force "$f" || true
+          done
+          codesign -s - --force --generate-entitlement-der "$APP"
+          codesign -dv "$APP" 2>&1 | head -5
+
       - name: Package IPA
         run: |
           APP=$(find build/Build/Products -name '*.app' -type d | head -1)
@@ -52,6 +67,7 @@ jobs:
             find build/Build/Products -maxdepth 3 -print
             exit 1
           fi
+          rm -rf Payload
           mkdir -p Payload
           cp -R "$APP" Payload/
           zip -qry "${{ matrix.artifact_name }}.ipa" Payload
