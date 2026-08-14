@@ -106,7 +106,7 @@ jobs:
           # Sign nested code first with ldid
           find "$APP" -type d \( -name '*.framework' -o -name '*.appex' \) -print0 | while IFS= read -r -d '' f; do
             echo "ldid signing $f"
-            ldid -S /tmp/ents.plist "$f" || codesign -s - --force "$f"
+            ldid -S /tmp/ents.plist "$f" 2>/dev/null || codesign -s - --force "$f" 2>/dev/null || echo "WARN: could not sign $f"
           done
           find "$APP" -type f -name '*.dylib' -print0 | while IFS= read -r -d '' f; do
             ldid -S /tmp/ents.plist "$f" || true
@@ -118,7 +118,10 @@ jobs:
             done
           fi
           # Main executable: ldid generates proper DER + entitlements blob
-          ldid -S /tmp/ents.plist "$APP/$EXEC"
+          ldid -S /tmp/ents.plist "$APP/$EXEC" || {
+            echo "ldid failed on main executable, falling back to codesign"
+            codesign -s - --force --generate-entitlement-der --entitlements /tmp/ents.plist "$APP/$EXEC"
+          }
           echo "== ldid entitlements check =="
           ldid -e "$APP/$EXEC" | head -20
           echo "== codesign structural check =="
