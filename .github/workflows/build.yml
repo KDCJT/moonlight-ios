@@ -44,15 +44,22 @@ jobs:
       - name: List build products
         run: find build/Build/Products -maxdepth 3 \( -name '*.app' -o -name '*.ipa' \) -print
 
+      - name: Debug output before anything
+        if: always()
+        run: |
+          APP=$(find build/Build/Products -name '*.app' -type d | head -1)
+          echo "APP=$APP"
+          find "$APP" -print | head -60
+          EXEC=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$APP/Info.plist")
+          echo "EXEC=$EXEC"
+          file "$APP/$EXEC" || true
+          ldid -e "$APP" 2>&1 | head -20 || true
+
       - name: Ad-hoc sign for TrollStore
         run: |
-          set -e
+          set -ex
           APP=$(find build/Build/Products -name '*.app' -type d | head -1)
-          echo "== Bundle contents =="
-          find "$APP" -maxdepth 2 -print
-          echo "== Executable info =="
           EXEC=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$APP/Info.plist")
-          file "$APP/$EXEC" || true
           # Sign nested code first, then the bundle itself (ad-hoc, no cert needed)
           find "$APP" -type d \( -name '*.framework' -o -name '*.appex' \) -print0 | while IFS= read -r -d '' f; do
             echo "signing $f"
