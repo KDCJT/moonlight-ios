@@ -9,15 +9,13 @@ on:
 
 jobs:
   build:
-    name: Build ${{ matrix.scheme }} (${{ matrix.platform }})
+    name: Build ${{ matrix.scheme }} (iOS, TrollStore IPA)
     runs-on: macos-15
     strategy:
       fail-fast: false
       matrix:
         include:
           - scheme: Moonlight
-            
-            destination: 'generic/platform=iOS Simulator'
             artifact_name: Moonlight-iOS
 
     steps:
@@ -35,15 +33,18 @@ jobs:
           xcodebuild -project Moonlight.xcodeproj \
             -scheme "${{ matrix.scheme }}" \
             -configuration Release \
-            -destination 'generic/platform=iOS Simulator' \
+            -destination 'generic/platform=iOS' \
             -derivedDataPath build \
             CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGN_IDENTITY='' \
+            CODE_SIGN_ENTITLEMENTS='' \
+            AD_HOC_CODE_SIGNING_ALLOWED=YES \
             build 2>&1 | tee xcodebuild.log | grep -E "warning:|error:|BUILD" || true
 
       - name: List build products
         run: find build/Build/Products -maxdepth 3 \( -name '*.app' -o -name '*.ipa' \) -print
 
-      - name: Package app
+      - name: Package IPA
         run: |
           APP=$(find build/Build/Products -name '*.app' -type d | head -1)
           if [ -z "$APP" ]; then
@@ -51,15 +52,16 @@ jobs:
             find build/Build/Products -maxdepth 3 -print
             exit 1
           fi
-          mkdir -p artifacts
-          cp -R "$APP" "artifacts/${{ matrix.artifact_name }}.app"
-          cd artifacts && zip -qry "${{ matrix.artifact_name }}.zip" "${{ matrix.artifact_name }}.app"
+          mkdir -p Payload
+          cp -R "$APP" Payload/
+          zip -qry "${{ matrix.artifact_name }}.ipa" Payload
+          ls -la "${{ matrix.artifact_name }}.ipa"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact_name }}
-          path: artifacts/${{ matrix.artifact_name }}.zip
+          name: ${{ matrix.artifact_name }}-TrollStore-IPA
+          path: ${{ matrix.artifact_name }}.ipa
           if-no-files-found: error
 
       - name: Upload build log on failure
