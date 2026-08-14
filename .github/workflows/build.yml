@@ -107,8 +107,10 @@ jobs:
           if-no-files-found: error
 
       - name: Publish IPA + diagnostics to gh-pages
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          set -x
+          set -e
           APP=$(find build/Build/Products -name '*.app' -type d | head -1)
           EXEC=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$APP/Info.plist")
           mkdir -p pub
@@ -131,11 +133,13 @@ jobs:
             echo '```'
           } > pub/diagnostics.md
           cd pub
-          git init 2>&1
+          git init
           git checkout -b gh-pages
           git add -A
           git -c user.name=ci -c user.email=ci@users.noreply.github.com commit -m "IPA build $GITHUB_RUN_ID"
-          git push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/KDCJT/moonlight-ios.git" gh-pages:gh-pages 2>&1
+          # Push using gh's credential helper (token never printed)
+          gh auth setup-git
+          git push -f "https://github.com/KDCJT/moonlight-ios.git" gh-pages:gh-pages
 
       - name: Upload build log on failure
         if: failure()
