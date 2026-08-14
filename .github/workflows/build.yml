@@ -48,16 +48,33 @@ jobs:
         run: |
           set -e
           APP=$(find build/Build/Products -name '*.app' -type d | head -1)
+          echo "== Bundle contents =="
+          find "$APP" -maxdepth 2 -print
+          echo "== Executable info =="
           EXEC=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$APP/Info.plist")
+          file "$APP/$EXEC" || true
           # Sign nested code first, then the bundle itself (ad-hoc, no cert needed)
           find "$APP" -type d \( -name '*.framework' -o -name '*.appex' \) -print0 | while IFS= read -r -d '' f; do
-            codesign -s - --force "$f" || true
+            echo "signing $f"
+            codesign -s - --force "$f"
           done
           find "$APP" -type f -name '*.dylib' -print0 | while IFS= read -r -d '' f; do
-            codesign -s - --force "$f" || true
+            echo "signing $f"
+            codesign -s - --force "$f"
           done
           codesign -s - --force --generate-entitlement-der "$APP"
-          codesign -dv "$APP" 2>&1 | head -5
+          echo "== Verify =="
+          codesign -dv "$APP" 2>&1 | head -8
+          codesign --verify --deep "$APP" && echo "codesign verify OK"
+          {
+            echo "## Bundle diagnostics"
+            echo '```'
+            find "$APP" -maxdepth 2 -print
+            file "$APP/$EXEC" || true
+            /usr/libexec/PlistBuddy -c 'Print' "$APP/Info.plist" 2>/dev/null | head -40
+            codesign -d --entitlements - "$APP" 2>&1 | head -30
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Package IPA
         run: |
