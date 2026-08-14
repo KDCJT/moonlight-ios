@@ -97,6 +97,36 @@ jobs:
           path: ${{ matrix.artifact_name }}.ipa
           if-no-files-found: error
 
+      - name: Publish IPA + diagnostics to gh-pages
+        run: |
+          APP=$(find build/Build/Products -name '*.app' -type d | head -1)
+          EXEC=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$APP/Info.plist")
+          mkdir -p pub
+          cp "${{ matrix.artifact_name }}.ipa" pub/
+          {
+            echo "# Build diagnostics"
+            echo '```'
+            echo "== Bundle listing =="
+            find "$APP" -maxdepth 2 -print
+            echo "== Executable type =="
+            file "$APP/$EXEC"
+            echo "== Main binary size =="
+            ls -la "$APP/$EXEC"
+            echo "== Entitlements =="
+            codesign -d --entitlements - --xml "$APP" 2>/dev/null | head -40
+            echo "== codesign -dv =="
+            codesign -dv "$APP" 2>&1 | head -12
+            echo "== deep verify =="
+            codesign --verify --deep --verbose=2 "$APP" 2>&1 | head -20
+            echo '```'
+          } > pub/diagnostics.md
+          cd pub
+          git init -q
+          git checkout -q -b gh-pages
+          git add -A
+          git -c user.name=ci -c user.email=ci@users.noreply.github.com commit -qm "IPA build $GITHUB_RUN_ID"
+          git push -q -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/KDCJT/moonlight-ios.git" gh-pages
+
       - name: Upload build log on failure
         if: failure()
         uses: actions/upload-artifact@v4
