@@ -16,7 +16,7 @@ jobs:
       matrix:
         include:
           - scheme: Moonlight
-            platform: iOS
+            
             destination: 'generic/platform=iOS Simulator'
             artifact_name: Moonlight-iOS
 
@@ -35,14 +35,22 @@ jobs:
           xcodebuild -project Moonlight.xcodeproj \
             -scheme "${{ matrix.scheme }}" \
             -configuration Release \
-            -destination "${{ matrix.destination }}" \
+            -destination 'generic/platform=iOS Simulator' \
             -derivedDataPath build \
             CODE_SIGNING_ALLOWED=NO \
-            clean build | tee xcodebuild.log | grep -E "warning:|error:|BUILD" || true
+            build 2>&1 | tee xcodebuild.log | grep -E "warning:|error:|BUILD" || true
+
+      - name: List build products
+        run: find build/Build/Products -maxdepth 3 \( -name '*.app' -o -name '*.ipa' \) -print
 
       - name: Package app
         run: |
-          APP=$(find build/Build/Products/Release -maxdepth 1 -name '*.app' | head -1)
+          APP=$(find build/Build/Products -name '*.app' -type d | head -1)
+          if [ -z "$APP" ]; then
+            echo "No .app found — searching for products:"
+            find build/Build/Products -maxdepth 3 -print
+            exit 1
+          fi
           mkdir -p artifacts
           cp -R "$APP" "artifacts/${{ matrix.artifact_name }}.app"
           cd artifacts && zip -qry "${{ matrix.artifact_name }}.zip" "${{ matrix.artifact_name }}.app"
